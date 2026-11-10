@@ -1,0 +1,458 @@
+{
+  "name": "Daily Dialogue Analysis - Zoho CRM Source Fixed",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -672,
+        400
+      ],
+      "id": "6dee6237-4c68-4722-ac26-dcd4e5e261b0",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "resource": "lead",
+        "operation": "getAll",
+        "returnAll": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.zohoCrm",
+      "typeVersion": 1,
+      "position": [
+        -528,
+        400
+      ],
+      "id": "2909a4b0-8d9e-4f20-9cf4-aa32099b7cdd",
+      "name": "Get leads from Zoho CRM",
+      "credentials": {
+        "zohoOAuth2Api": {
+          "id": "",
+          "name": "Zoho crm"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -192,
+        400
+      ],
+      "id": "d83622c6-e9f1-44c2-b7cb-2bce55cfb65f",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "d926a1a0-be7f-4e92-b998-3abb2f095c3b",
+              "leftValue": "={{$json.session_id}}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        288,
+        416
+      ],
+      "id": "b43c775c-c579-44c9-b23e-540903fe08db",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryManager",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "28f93e89-63b1-439a-be5f-a6ab2bf40d82",
+      "name": "Chat Memory Manager"
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $json.session_id + '__Postgres_Chat_Memory' }}",
+        "contextWindowLength": 50
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.4,
+      "position": [
+        -16,
+        160
+      ],
+      "id": "48795b55-af0e-4ebd-984b-4888f011bca3",
+      "name": "Postgres Chat Memory",
+      "credentials": {
+        "postgres": {
+          "id": "",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ 'ДАНІ З CRM (джерело істини, не змінюй): lead_id=' + $('Loop Over Items').item.json.lead_id + ', score=' + ($('Loop Over Items').item.json.score === '' ? 'не визначено' : $('Loop Over Items').item.json.score) + ', status=' + $('Loop Over Items').item.json.status + '\\n\\nІсторія діалогу:\\n' + JSON.stringify($json.messages) }}",
+        "options": {
+          "systemMessage": "Ти — AI-аналітик відділу продажів GrowthBot AI.\n\nТвоє завдання — аналізувати історію діалогу з потенційним клієнтом, яку ти отримуєш у Prompt (User Message).\n\nДля кожного діалогу визнач:\n\n1. lead_id/session_id, якщо вони доступні в контексті.\n2. Коротко визнач потребу клієнта.\n3. Визнач BANT:\n   - Need — потреба\n   - Budget — бюджет\n   - Authority — хто приймає рішення\n   - Timeline — термін\n4. Оціни якість кваліфікації від 0 до 10.\n5. Визнач статус:\n   - Qualified\n   - In Progress\n   - Disqualified\n   - Undetermined (якщо score не визначено)\n6. Визнач основні ризики або проблеми діалогу.\n7. Дай коротку рекомендацію менеджеру.\n\nВажливо:\n- Score і Status у звіті бери ТІЛЬКИ з блоку «ДАНІ З CRM» у запиті. Не перераховуй і не змінюй їх. Якщо score «не визначено» — пиши «Score: Не визначено» і «Status: Undetermined».\n- Не стверджуй того, чого клієнт прямо не говорив у діалозі (наприклад, відмову або плани впровадження).\n- Аналізуй тільки інформацію, яка є в діалозі.\n- Не вигадуй відсутні дані.\n- Якщо інформації немає, напиши \"Не визначено\".\n- Не відповідай клієнту і не продовжуй діалог.\n- Ти створюєш внутрішній аналітичний звіт для відділу продажів.\n- Відповідь має бути українською мовою.\n- Використовуй гривні (грн), якщо вказаний бюджет.\n\nФормат відповіді:\n\nLEAD ANALYSIS\n\nNeed: ...\nBudget: ...\nAuthority: ...\nTimeline: ...\n\nScore: X/10\nStatus: ...\n\nRisks:\n- ...\n- ...\n\nRecommendation:\n..."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        352,
+        0
+      ],
+      "id": "81e7b91d-8e0b-4179-ae4d-d4a5d5e4b90b",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_ID",
+          "mode": "list",
+          "cachedResultName": "GrowthBot Test CRM"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Leads"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{ $('Loop Over Items').item.json.lead_id }}",
+            "session_id": "={{ $('Loop Over Items').item.json.session_id }}",
+            "name": "={{ $('Loop Over Items').item.json.name }}",
+            "phone": "={{ (() => { const p = $('Loop Over Items').item.json.phone; if (p === undefined || p === null || String(p).trim() === '' || ['0Не надано','Не надано','Не визначено','Unknown'].includes(String(p).trim())) return ''; return String(p).trim(); })() }}",
+            "need": "={{ $('Loop Over Items').item.json.need }}",
+            "budget": "={{ $('Loop Over Items').item.json.budget }}",
+            "authority": "={{ $('Loop Over Items').item.json.authority }}",
+            "timeline": "={{ $('Loop Over Items').item.json.timeline }}",
+            "score": "={{ $('Loop Over Items').item.json.score }}",
+            "status": "={{ (() => { const s = $('Loop Over Items').item.json.score; if (s === '' || s === null || s === undefined) return 'Undetermined'; const n = Number(s); if (!Number.isFinite(n) || n < 0 || n > 10) return 'Undetermined'; return n <= 3 ? 'Disqualified' : n <= 7 ? 'In Progress' : 'Qualified'; })() }}",
+            "analysis": "={{ ($('Chat Memory Manager').item.json.messages || []).length ? $json.output : ($('Loop Over Items').item.json.analysis || '') }}"
+          },
+          "matchingColumns": [
+            "session_id"
+          ],
+          "schema": [
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "need",
+              "displayName": "need",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "budget",
+              "displayName": "budget",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "authority",
+              "displayName": "authority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timeline",
+              "displayName": "timeline",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "score",
+              "displayName": "score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "analysis",
+              "displayName": "analysis",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        704,
+        80
+      ],
+      "id": "ac11a342-4076-4cf3-9639-cd289ffd4f07",
+      "name": "Append or update row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.1-flash-lite",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        320,
+        144
+      ],
+      "id": "37bcd85f-b13a-4167-bf5d-fe2b8800558c",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn items.map(item => {\n  const r = item.json || {};\n  let payload = {};\n  const rawDescription = r.Description ?? r.description ?? '';\n  if (typeof rawDescription === 'string' && rawDescription.trim()) {\n    try { payload = JSON.parse(rawDescription); } catch (_) {}\n  } else if (rawDescription && typeof rawDescription === 'object') {\n    payload = rawDescription;\n  }\n  const pick = (...values) => values.find(v => v !== undefined && v !== null && String(v).trim() !== '');\n  const session = pick(r.Skype_ID, r.SkypeId, r.skype_id, payload.session_id, payload.sessionId, '');\n  const scoreRaw = pick(payload.score, r.Score, r.score, '');\n  const scoreNum = scoreRaw === '' ? '' : Number(scoreRaw);\n  const score = Number.isFinite(scoreNum) && scoreNum >= 0 && scoreNum <= 10 ? scoreNum : '';\n  const statusRaw = pick(payload.status, r.Status, r.status, '');\n  const status = score !== '' ? (score <= 3 ? 'Disqualified' : score <= 7 ? 'In Progress' : 'Qualified') : 'Undetermined';\n  return { json: {\n    ...r,\n    lead_id: session ? 'GL-' + session : pick(payload.lead_id, r.Lead_ID, r.lead_id, r.id, ''),\n    session_id: session,\n    name: pick(payload.name, r.Full_Name, [r.First_Name, r.Last_Name].filter(Boolean).join(' '), r.Last_Name, ''),\n    phone: pick(payload.phone, r.Phone, r.Mobile, ''),\n    need: pick(payload.need, r.Need, r.need, 'Не визначено'),\n    budget: pick(payload.budget, r.Budget, r.budget, 'Не визначений'),\n    authority: pick(payload.authority, r.Authority, r.authority, 'Не визначено'),\n    timeline: pick(payload.timeline, r.Timeline, r.timeline, 'Не визначено'),\n    score,\n    status,\n    analysis: pick(payload.analysis, r.Analysis, r.analysis, ''),\n    messages: pick(r.messages, r.Messages, ''),\n  }};\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        400
+      ],
+      "id": "a43b428a-5b1f-4f74-98dd-02f22aeaa9b6",
+      "name": "Normalize Zoho Lead Data"
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get leads from Zoho CRM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Chat Memory Manager",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chat Memory Manager": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Append or update row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Chat Memory Manager",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append or update row in sheet": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Zoho Lead Data": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get leads from Zoho CRM": {
+      "main": [
+        [
+          {
+            "node": "Normalize Zoho Lead Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "nodeGroups": []
+}

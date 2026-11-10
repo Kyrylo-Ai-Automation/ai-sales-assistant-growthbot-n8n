@@ -1,0 +1,281 @@
+{
+  "name": "Weekly CEO Report - Zoho CRM Source Fixed",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                5
+              ],
+              "triggerAtHour": 17
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "id": "24af4471-61c3-4459-aafd-bfaa99323a2a",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "resource": "lead",
+        "operation": "getAll",
+        "returnAll": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.zohoCrm",
+      "typeVersion": 1,
+      "position": [
+        208,
+        0
+      ],
+      "id": "12c736e7-3535-4777-83c1-c6b34a6bfc37",
+      "name": "Get leads from Zoho CRM",
+      "credentials": {
+        "zohoOAuth2Api": {
+          "id": "",
+          "name": "Zoho crm"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// CRM-лиды и таблица анализа WF2 читаются по имени ноды;\n// нода \"Wait for CRM + Sheets\" гарантирует, что обе ветки уже выполнены.\nconst rawLeads = $('Get leads from Zoho CRM').all();\nconst sheetRows = $('Get WF2 analysis from Sheets').all()\n  .map(i => i.json || {})\n  .filter(r => String(r.session_id ?? '').trim() !== '');\n\n// Анализ WF2 по session_id (= Skype_ID в Zoho).\nconst analysisBySession = {};\nfor (const row of sheetRows) {\n  const sid = String(row.session_id).trim();\n  const text = String(row.analysis ?? '').trim();\n  if (text) analysisBySession[sid] = text;\n}\n\n// Отчётный период: последние 7 дней.\nconst periodStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);\n\nconst pick = (...values) =>\n  values.find(v =>\n    v !== undefined &&\n    v !== null &&\n    String(v).trim() !== ''\n  );\n\nconst normalize = v => String(v ?? '').trim();\n\nconst isUnknown = v =>\n  !normalize(v) ||\n  [\n    'не определен',\n    'не определён',\n    'не визначений',\n    'не визначено',\n    'не вказано',\n    'не указано',\n    'unknown',\n    'n/a',\n    'null'\n  ].includes(normalize(v).toLowerCase());\n\n// Формируем записи и оставляем только лиды\n// с заполненным Skype_ID — session_id.\nconst leads = rawLeads.map(item => {\n  const r = item.json || {};\n\n  let payload = {};\n  const desc = r.Description ?? r.description ?? '';\n\n  if (typeof desc === 'string' && desc.trim()) {\n    try {\n      payload = JSON.parse(desc);\n    } catch (_) {}\n  } else if (desc && typeof desc === 'object') {\n    payload = desc;\n  }\n\n  const sessionId = pick(\n    r.Skype_ID,\n    r.SkypeId,\n    r.skype_id,\n    ''\n  );\n\n  const scoreRaw = pick(\n    payload.score,\n    r.Score,\n    r.score,\n    ''\n  );\n\n  const scoreNum =\n    scoreRaw === '' ? NaN : Number(scoreRaw);\n\n  const score =\n    Number.isFinite(scoreNum) &&\n    scoreNum >= 0 &&\n    scoreNum <= 10\n      ? scoreNum\n      : '';\n\n  const statusRaw = pick(\n    payload.status,\n    r.Status,\n    r.status,\n    ''\n  );\n\n  const status = score !== ''\n    ? (\n        score <= 3\n          ? 'Disqualified'\n          : score <= 7\n            ? 'In Progress'\n            : 'Qualified'\n      )\n    : 'Undetermined';\n\n  return {\n    lead_id: !isUnknown(sessionId)\n      ? 'GL-' + String(sessionId).trim()\n      : pick(payload.lead_id, r.Lead_ID, r.lead_id, r.id, ''),\n    session_id: sessionId,\n    name: pick(\n      payload.name,\n      r.Full_Name,\n      [r.First_Name, r.Last_Name]\n        .filter(Boolean)\n        .join(' '),\n      r.Last_Name,\n      'Не вказано'\n    ),\n    need: pick(\n      payload.need,\n      r.Need,\n      r.need,\n      'Не визначено'\n    ),\n    budget: pick(\n      payload.budget,\n      r.Budget,\n      r.budget,\n      'Не визначений'\n    ),\n    authority: pick(\n      payload.authority,\n      r.Authority,\n      r.authority,\n      'Не визначено'\n    ),\n    timeline: pick(\n      payload.timeline,\n      r.Timeline,\n      r.timeline,\n      'Не визначено'\n    ),\n    score,\n    status,\n    analysis: pick(\n      analysisBySession[String(sessionId ?? '').trim()],\n      payload.analysis,\n      r.Analysis,\n      r.analysis,\n      ''\n    ),\n    analysis_source: analysisBySession[String(sessionId ?? '').trim()]\n      ? 'WF2 (Google Sheets)'\n      : 'Zoho/WF1',\n    created_time: pick(r.Created_Time, r.createdTime, r.CreatedTime, '')\n  };\n}).filter(lead => !isUnknown(lead.session_id));\n\n// Статистика только по обработанным лидам.\nconst total = leads.length;\n\nconst qualified = leads.filter(\n  l => l.status === 'Qualified'\n).length;\n\nconst inProgress = leads.filter(\n  l => l.status === 'In Progress'\n).length;\n\nconst undetermined = leads.filter(\n  l => l.status === 'Undetermined'\n).length;\n\n// Новые лиды — по времени создания в отчётном периоде.\nconst newLeads = leads.filter(l => {\n  if (!l.created_time) return false;\n  const t = new Date(l.created_time);\n  return !isNaN(t) && t >= periodStart;\n}).length;\n\nconst analyzedByWf2 = leads.filter(\n  l => l.analysis_source === 'WF2 (Google Sheets)'\n).length;\n\nconst disqualified = leads.filter(\n  l => l.status === 'Disqualified'\n).length;\n\nconst scores = leads\n  .map(l => l.score)\n  .filter(score => score !== '');\n\nconst averageScore = scores.length\n  ? Number((\n      scores.reduce((a, b) => a + b, 0) /\n      scores.length\n    ).toFixed(1))\n  : 0;\n\nconst budgets = leads.filter(\n  l => !isUnknown(l.budget)\n);\n\nconst budgetsDefined = budgets.length;\nconst budgetsUnknown = total - budgetsDefined;\n\nconst byStage = {\n  Qualified: qualified,\n  'In Progress': inProgress,\n  Disqualified: disqualified,\n  Undetermined: undetermined\n};\n\nreturn [{\n  json: {\n    total_leads: total,\n    crm_total_received: rawLeads.length,\n    analyzed_leads: total,\n    leads_without_session_id:\n      rawLeads.length - total,\n    new_leads_count: newLeads,\n    new_leads_period_days: 7,\n    undetermined,\n    leads_with_wf2_analysis: analyzedByWf2,\n    sheet_rows_received: sheetRows.length,\n    qualified,\n    in_progress: inProgress,\n    disqualified,\n    average_score: averageScore,\n    scores_count: scores.length,\n    budgets_defined: budgetsDefined,\n    budgets_unknown: budgetsUnknown,\n    by_stage: byStage,\n    by_owner: {\n      'Не використовується — поле owner відсутнє': total\n    },\n    leads\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        0
+      ],
+      "id": "83673ffd-44c1-427b-a4c4-58cbdfc993eb",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Проаналізуй дані лідів GrowthBot AI, отримані з Zoho CRM і нормалізовані в Code in JavaScript, та сформуй структурований CEO-звіт. Ідентифікатор сесії ліда зберігається в Skype_ID і нормалізується в session_id. Поле analysis кожного ліда береться з таблиці аналізу WF2 (Google Sheets) за session_id; якщо його там немає — із Zoho. Статус Undetermined означає, що оцінка не визначена; це НЕ те саме, що Disqualified, і такі ліди не слід вважати відхиленими.\n\nКРИТИЧНО ВАЖЛИВО:\n\nВикористовуй ТІЛЬКИ інформацію, яка є у вхідних даних.\n\nЗАБОРОНЕНО вигадувати:\n- ціни або цінові вилки;\n- ROI або окупність;\n- технічні інтеграції;\n- конкретні строки зв'язку, наприклад \"протягом 24 годин\";\n- менеджерів, якщо їх немає у даних;\n- дії, яких немає підстав робити з даних;\n- причини проблем, яких немає у даних;\n- потреби або заперечення клієнта, яких він не висловлював.\n\nЯкщо конкретної інформації немає, НЕ ВИГАДУЙ її.\n\nДля рекомендацій використовуй тільки ті дії, які логічно та безпосередньо випливають із наявних даних.\n\nНаприклад:\n- якщо бюджет не визначений → рекомендуй уточнити бюджет;\n- якщо рішення приймається разом із партнером → рекомендуй залучити партнера до наступного обговорення;\n- якщо термін довгий → рекомендуй підтримувати контакт без агресивного продажу;\n- якщо Score низький та Status Disqualified → не рекомендуй активний продаж;\n- якщо потреба та термін чіткі → можна рекомендувати наступний крок, але не вигадувати конкретний формат, ціну або строк контакту.\n\nВАЖЛИВО:\n\nНе вважай ліда Qualified лише через наявність заповнених полів.\n\nВикористовуй фактичні status та score з CRM.\n\nОкремо зверни увагу на:\n1. problems — фактичні проблеми та ризики;\n2. bottleneck — головне вузьке місце;\n3. managers — тільки конкретні ліди, для яких із даних випливає конкретна дія;\n4. recommendations — загальні рекомендації, що випливають із даних;\n5. summary — короткий фактичний підсумок.\n\nДля Disqualified лідів не пропонуй активний продаж.\n\nНе використовуй слово \"менеджер\", якщо відповідальний менеджер не вказаний у даних. У такому випадку говори \"команда продажів\" або \"відповідальний за лід\", але не вигадуй ім'я.\n\nВикористовуй гривні (грн).\n\nВідповідь повинна відповідати структурі Structured Output Parser.\n\nВхідні дані:\n\n{{ JSON.stringify($json) }}\n\nФормат кожного поля:\n- problems — масив рядків\n- bottleneck — один рядок\n- managers — масив об'єктів з полями lead та action\n- recommendations — масив рядків\n- summary — один рядок\n\nНе пиши додатковий текст поза структурованою відповіддю.\nДОДАТКОВЕ ПРАВИЛО ДЛЯ managers:\n\nПоле managers має містити ТІЛЬКИ ті ліди, для яких конкретна дія прямо випливає з даних.\n\nНе вигадуй:\n- дзвінок;\n- демо;\n- презентацію;\n- цінову пропозицію;\n- технічну консультацію;\n- конкретний строк контакту;\n- ROI;\n- розсилку;\n- follow-up через конкретну кількість місяців.\n\nЯкщо з даних неможливо визначити конкретну дію — НЕ включай такого ліда до managers.\n\nДля прикладу:\n- якщо клієнт приймає рішення разом із партнером → можна рекомендувати залучити партнера;\n- якщо бюджет не визначений → можна рекомендувати уточнити бюджет;\n- якщо клієнт має довгий термін → можна рекомендувати підтримувати контакт;\n- якщо Status = Disqualified → не включати до managers для активного продажу.\n\nКожна дія в managers повинна бути безпосередньо підтверджена даними ліда.\n\nЯкщо немає жодної конкретної дії, managers може бути порожнім масивом [].\n\nДОДАТКОВЕ ПРАВИЛО ДЛЯ recommendations:\n\nРекомендації повинні бути загальними та випливати зі статистики.\n\nНе вигадуй конкретні канали, кампанії, розсилки, демо, ціни, ROI або строки, якщо їх немає у вхідних даних.",
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        832,
+        0
+      ],
+      "id": "6ebea2d1-a335-400a-a883-ec103d7f4bd4",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.1-flash-lite",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        688,
+        208
+      ],
+      "id": "8d2c0fb0-4c47-451a-b50f-bac5c460755d",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "={{\n`📊 CEO WEEKLY REPORT\n\n📈 Статистика\nЛидов: ${$('Code in JavaScript').item.json.total_leads}\nQualified: ${$('Code in JavaScript').item.json.qualified}\nIn Progress: ${$('Code in JavaScript').item.json.in_progress}\nDisqualified: ${$('Code in JavaScript').item.json.disqualified}\nНе визначено (без оцінки): ${$('Code in JavaScript').item.json.undetermined}\nНових лідів за 7 днів: ${$('Code in JavaScript').item.json.new_leads_count}\nСредний Score: ${$('Code in JavaScript').item.json.average_score}\nБюджет определён: ${$('Code in JavaScript').item.json.budgets_defined}\nБюджет не определён: ${$('Code in JavaScript').item.json.budgets_unknown}\n\n⚠️ Основные проблемы\n${$json.output.problems.map(p => '• ' + p).join('\\n')}\n\n🚧 Bottleneck\n${$json.output.bottleneck}\n\n🎯 Приоритетные действия\n${$json.output.managers.map(m => '• ' + m.lead + ': ' + m.action).join('\\n')}\n\n💡 Рекомендации\n${$json.output.recommendations.map(r => '• ' + r).join('\\n')}\n\n📝 Итог\n${$json.output.summary}`\n}}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "Markdown"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1184,
+        0
+      ],
+      "id": "b8ce89b1-b7dd-493e-b334-3edf88b358f8",
+      "name": "Send a text message",
+      "credentials": {
+        "telegramApi": {
+          "id": "",
+          "name": "ReportingBot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"problems\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"string\"\n      }\n    },\n    \"bottleneck\": {\n      \"type\": \"string\"\n    },\n    \"managers\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"lead\": {\n            \"type\": \"string\"\n          },\n          \"action\": {\n            \"type\": \"string\"\n          }\n        },\n        \"required\": [\n          \"lead\",\n          \"action\"\n        ]\n      }\n    },\n    \"recommendations\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"string\"\n      }\n    },\n    \"summary\": {\n      \"type\": \"string\"\n    }\n  },\n  \"required\": [\n    \"problems\",\n    \"bottleneck\",\n    \"managers\",\n    \"recommendations\",\n    \"summary\"\n  ]\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1008,
+        208
+      ],
+      "id": "64b4b22e-4848-4b15-af62-25a6bb15a868",
+      "name": "Structured Output Parser"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_ID",
+          "mode": "list",
+          "cachedResultName": "GrowthBot Test CRM"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Leads"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        208,
+        208
+      ],
+      "id": "bf933601-70ad-41fc-b428-e03b77f75b5b",
+      "name": "Get WF2 analysis from Sheets",
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        416,
+        0
+      ],
+      "id": "23624ef4-170c-4fae-b404-7117281cd004",
+      "name": "Wait for CRM + Sheets"
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get leads from Zoho CRM",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get WF2 analysis from Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get leads from Zoho CRM": {
+      "main": [
+        [
+          {
+            "node": "Wait for CRM + Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get WF2 analysis from Sheets": {
+      "main": [
+        [
+          {
+            "node": "Wait for CRM + Sheets",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Wait for CRM + Sheets": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "nodeGroups": []
+}

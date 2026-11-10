@@ -1,0 +1,332 @@
+{
+  "name": "AI Lead Qualification - Score Status CRM Cycle Fixed",
+  "nodes": [
+    {
+      "parameters": {
+        "public": true,
+        "initialMessages": "Вітаю! 👋\nЯ AI-консультант GrowthBot AI.\n\nДопоможу визначити, які процеси у вашому бізнесі можна автоматизувати за допомогою AI.\n\nРозкажіть, будь ласка, що ви хотіли б автоматизувати?",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        384,
+        -240
+      ],
+      "id": "39de1552-d6ad-4142-8f43-8d6b805cba12",
+      "name": "When chat message received"
+    },
+    {
+      "parameters": {
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "=# GrowthBot AI — System Message\n\n## 1. РОЛЬ\n\nТы — GrowthBot AI, AI-консультант компании GrowthLab. Помогай клиентам понять, какие бизнес-процессы можно автоматизировать с помощью AI.\n\nОбщайся естественно, профессионально и без давления. Отвечай на вопросы клиента по существу. Не превращай диалог в анкету.\n\n## 2. ПРАВИЛА ДИАЛОГА\n\n- Задавай не более одного основного вопроса в одном сообщении.\n- Перед вопросом проверяй всю доступную историю диалога.\n- Не спрашивай повторно то, на что клиент уже ответил.\n- Сначала выясняй потребность, затем при необходимости уточняй бюджет, полномочия, сроки и готовность к внедрению.\n- Не требуй имя, фамилию, телефон или название компании для продолжения консультации.\n- Если клиент отказался сообщать данные, уважай отказ.\n- Никогда не выдумывай информацию.\n\n## 3. КВАЛИФИКАЦИЯ\n\nОпределяй данные по истории диалога:\n\n- `need` — потребность клиента.\n- `budget` — бюджет или `Не определен`.\n- `authority` — кто принимает решение или `Не определено`.\n- `timeline` — срок внедрения или `Не определено`.\n- `readiness` — высокая, средняя или низкая готовность.\n- `name` — имя, если сообщено.\n- `last_name` — фамилия, если сообщена.\n- `phone` — телефон, если сообщён.\n- `company` — компания, если сообщена.\n- `analysis` — краткое резюме фактов из разговора.\n\nЕсли информации недостаточно, продолжай консультацию и задай один уместный вопрос. Не требуй заполнения всех полей.\n\nКогда потребность и ответы клиента позволяют оценить потенциальный интерес, выполни квалификацию. Не жди, пока будут получены все контактные данные.\n\n## 4. SCORE И STATUS\n\nУстанови один числовой `score` от 0 до 10 на основе реальной потребности и готовности клиента:\n\n- `0–3` — конкретная потребность или намерение внедрения отсутствуют.\n- `4–5` — интерес есть, но клиент пока изучает варианты или не готов к решению.\n- `6–7` — потребность понятна, интерес есть, но остаются существенные вопросы.\n- `8` — выраженная потребность и высокая заинтересованность.\n- `9–10` — чёткая потребность, высокая готовность и понятный следующий шаг.\n\nУстанови `status` строго по score:\n\n- `0–3` → `Disqualified`\n- `4–7` → `In Progress`\n- `8–10` → `Qualified`\n\nЕсли оценку определить невозможно, оставь `score` пустым и не подставляй 0: `status` тогда будет `Undetermined` (это не то же самое, что `Disqualified`). Значение `score` — целое число 0–10, одно и то же для Zoho и Google Sheets.\n\nНе снижай оценку только из-за отсутствия телефона, фамилии или бюджета. Не придумывай факты для повышения оценки.\n\n## 5. SESSION ID И ДАННЫЕ\n\nИспользуй точный `sessionId` текущего чата, если он доступен в контексте выполнения.\n\n- `session_id` — точный `sessionId`.\n- `lead_id` — `GL-` + точный `sessionId`.\n- Не создавай выдуманный `sessionId`.\n- Не меняй значения данных между вызовами инструментов.\n\nПодготовь единый набор данных:\n\n`lead_id`, `session_id`, `name`, `last_name`, `phone`, `company`, `need`, `budget`, `authority`, `timeline`, `readiness`, `score`, `status`, `analysis`.\n\nНеизвестные контактные данные оставляй пустыми. Для неизвестных бюджета и срока используй `Не определен` и `Не определено` соответственно. Не подменяй отсутствующий телефон текстом или выдуманным номером.\n\n## 6. СОХРАНЕНИЕ В ZOHO CRM\n\nИнструмент: `Create a lead in Zoho CRM`.\n\nПосле квалификации попробуй создать лид, если можешь передать фактические данные в соответствии с обязательными полями инструмента.\n\n- Передай имя, фамилию, телефон и компанию только в том случае, если они известны.\n- Передай `sessionId` в поле `Skype ID`, если это поле доступно.\n- Поле `Description` собирается автоматически как структурированный JSON из параметров `name`, `phone`, `need`, `budget`, `authority`, `timeline`, `readiness`, `analysis`, `score`. Обязательно передай их все, чтобы score и BANT попали в Zoho.\n- Не выдумывай обязательные поля и не подменяй фамилию именем.\n\nЕсли инструмент вернул ошибку, считай создание лида неподтверждённым. Не утверждай, что лид создан.\n\n## 7. СОХРАНЕНИЕ В GOOGLE SHEETS\n\nИнструмент: `Google Sheets Tool`.\n\n**После попытки сохранения в Zoho обязательно отдельно попробуй вызвать `Google Sheets Tool`, независимо от результата Zoho.** Ошибка Zoho не является причиной пропускать Google Sheets.\n\nПередай данные того же лида в таблицу `GrowthBot Test CRM`, лист `Leads`, используя поля:\n\n`lead_id`, `session_id`, `name`, `phone`, `need`, `budget`, `authority`, `timeline`, `score`, `status`, `analysis`.\n\nИспользуй одинаковые `score`, `status`, `session_id` и остальные подтверждённые значения в обоих инструментах.\n\nЕсли телефон неизвестен, передай пустое значение, если инструмент это поддерживает. Не выдумывай данные.\n\nПосле вызова проверь результат Google Sheets. Не утверждай, что запись сохранена, если инструмент не подтвердил успех.\n\n## 8. ОБЯЗАТЕЛЬНЫЙ ПОРЯДОК ДЕЙСТВИЙ\n\nКогда квалификация завершена:\n\n1. Подготовь единый набор данных из диалога.\n2. Рассчитай окончательный `score`.\n3. Определи `status` по правилам выше.\n4. Попробуй вызвать `Create a lead in Zoho CRM`.\n5. Независимо от результата Zoho попробуй вызвать `Google Sheets Tool`.\n6. Проверь результаты обоих инструментов.\n7. Только после этого сформируй ответ клиенту.\n\nНе заменяй вызов инструмента текстовым обещанием. Не ограничивайся подготовкой JSON в сообщении. Используй реальные доступные инструменты.\n\nНе вызывай инструмент повторно без необходимости, если результат неоднозначен и повтор может создать дубликат.\n\n## 9. ОТВЕТ КЛИЕНТУ\n\nПродолжай помогать клиенту независимо от сохранения данных.\n\nНе показывай внутренние `score`, `status`, `lead_id`, `session_id` и `analysis`.\n\nСообщай об успешном сохранении только для тех систем, которые действительно подтвердили операцию. Если сохранение не удалось, не выдумывай причину и не заявляй об успехе.\n\nГлавные приоритеты: полезная консультация, достоверные данные, корректная квалификация и отдельная попытка сохранения в обе системы."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        704,
+        -240
+      ],
+      "id": "f8cf0f2e-3530-4596-bc8e-d894e36975e8",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "contextWindowLength": 50
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.4,
+      "position": [
+        800,
+        -32
+      ],
+      "id": "c4ad9689-c9dc-4f22-b199-403ffd97aeb7",
+      "name": "Postgres Chat Memory",
+      "credentials": {
+        "postgres": {
+          "id": "",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Зберігай дані кваліфікованого ліда в Google Sheets після первинної кваліфікації клієнта. Викликай цей інструмент після того, як зібрано достатньо інформації про потребу клієнта, навіть якщо клієнт не надав телефон або бюджет.\n\nПередавай фактичні дані з розмови без вигадування значень. Використовуй однакові lead_id, session_id, need, budget, authority, timeline, score та status, що й для Zoho CRM. Не заповнюй відсутній телефон значенням «Неизвестно» — залишай його порожнім, якщо це дозволяє структура таблиці.\n\nScore — ціле число від 0 до 10. Якщо оцінку неможливо визначити, залиш score порожнім (не 0): тоді status = Undetermined. Інакше status: 0–3 — Disqualified, 4–7 — In Progress, 8–10 — Qualified (розраховується автоматично з того самого значення score).\n\nНе повідомляй клієнту, що запис створено або оновлено, доки інструмент не повернув успішний результат. Якщо інструмент завершився помилкою, не стверджуй, що дані збережено.",
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_ID",
+          "mode": "list",
+          "cachedResultName": "GrowthBot Test CRM"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Leads"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "=GL-{{$json.sessionId}}",
+            "session_id": "={{$json.sessionId}}",
+            "name": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('name', `Customer's full name.`, 'string') }}",
+            "phone": "={{ (() => { const p = $fromAI('phone', `Customer phone number exactly as provided, or leave blank/unknown if not provided. Do not invent a number or add a leading zero automatically.`, 'string'); if (!p || ['не надано','не предоставлен','unknown','не визначено','неизвестно'].includes(String(p).trim().toLowerCase())) return ''; const s = String(p).trim(); return s; })() }}",
+            "need": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('need', `The customer's business problem and what they want to automate.`, 'string') }}",
+            "budget": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('budget', `The customer's approximate budget or investment range.`, 'string') }}",
+            "authority": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('authority', `Whether the customer is the decision-maker or needs approval from someone else.`, 'string') }}",
+            "timeline": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('timeline', `When the customer wants to start the project.`, 'string') }}",
+            "score": "={{ (() => { const raw = $fromAI('score', `Qualification score as an integer from 0 to 10. If the score cannot be determined from the conversation, leave it EMPTY — never use 0 as a placeholder. Use the same score in Zoho and Google Sheets.`, 'number'); if (raw === null || raw === undefined || String(raw).trim() === '') return ''; const n = Number(raw); return (Number.isFinite(n) && n >= 0 && n <= 10) ? Math.round(n) : ''; })() }}",
+            "status": "={{ (() => { const raw = $fromAI('score', `Qualification score as an integer from 0 to 10. If the score cannot be determined from the conversation, leave it EMPTY — never use 0 as a placeholder. Use the same score in Zoho and Google Sheets.`, 'number'); if (raw === null || raw === undefined || String(raw).trim() === '') return 'Undetermined'; const n0 = Number(raw); if (!Number.isFinite(n0) || n0 < 0 || n0 > 10) return 'Undetermined'; const n = Math.round(n0); return n <= 3 ? 'Disqualified' : n <= 7 ? 'In Progress' : 'Qualified'; })() }}",
+            "analysis": "={{ $fromAI('analysis', `Short factual summary of the conversation. Do not invent facts.`, 'string') }}"
+          },
+          "matchingColumns": [
+            "lead_id"
+          ],
+          "schema": [
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "need",
+              "displayName": "need",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "budget",
+              "displayName": "budget",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "authority",
+              "displayName": "authority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "timeline",
+              "displayName": "timeline",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "score",
+              "displayName": "score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "analysis",
+              "displayName": "analysis",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        1184,
+        -64
+      ],
+      "id": "fbb10abf-fd9e-4b4c-b7ad-ec2b3b6d52e3",
+      "name": "Append or update row in sheet in Google Sheets",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Створюй лід у Zoho CRM після первинної кваліфікації, коли є достатньо фактичних даних. Не повідомляй про збереження до успішного результату.\n\nПередавай лише факти з розмови. Не вигадуй ім'я, прізвище, телефон, бюджет чи інші дані.\n\nSkype_ID заповнюється автоматично точним sessionId. Поле Description формується автоматично як структурований JSON із параметрів name, phone, need, budget, authority, timeline, readiness, analysis та score — тому передай ці параметри.\n\nScore — ціле число 0–10. Якщо оцінку неможливо визначити, залиш score порожнім (не 0). Status розраховується автоматично: 0–3 Disqualified, 4–7 In Progress, 8–10 Qualified, порожній score → Undetermined.\n\nЯкщо збереження не вдалося, не стверджуй, що лід створено.",
+        "resource": "lead",
+        "Company": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Company', `Используй название компании клиента, если оно известно. Не выдумывай название`, 'string') }}",
+        "lastName": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Last_Name', `Фамилия лида. Используй только фамилию, которую клиент явно сообщил в диалоге. Не подставляй имя, название компании или другие данные вместо фамилии. Если фамилия неизвестна, не выдумывай её.`, 'string') }}",
+        "additionalFields": {
+          "Description": "={{ (() => { const score = (() => { const raw = $fromAI('score', `Qualification score as an integer from 0 to 10. If the score cannot be determined from the conversation, leave it EMPTY — never use 0 as a placeholder. Use the same score in Zoho and Google Sheets.`, 'number'); if (raw === null || raw === undefined || String(raw).trim() === '') return ''; const n = Number(raw); return (Number.isFinite(n) && n >= 0 && n <= 10) ? Math.round(n) : ''; })(); const status = score === '' ? 'Undetermined' : (score <= 3 ? 'Disqualified' : score <= 7 ? 'In Progress' : 'Qualified'); return JSON.stringify({ lead_id: 'GL-' + $json.sessionId, session_id: $json.sessionId, name: $fromAI('name', `Customer's first name or full name as provided. Leave empty if unknown.`, 'string'), phone: $fromAI('phone', `Customer phone number exactly as provided; leave EMPTY if not provided. Do not invent a number.`, 'string'), need: $fromAI('need', `The customer's business problem and what they want to automate.`, 'string'), budget: $fromAI('budget', `The customer's approximate budget, or 'Не определен' if unknown.`, 'string'), authority: $fromAI('authority', `Whether the customer is the decision-maker or needs approval from someone else, or 'Не определено'.`, 'string'), timeline: $fromAI('timeline', `When the customer wants to start the project, or 'Не определено'.`, 'string'), readiness: $fromAI('readiness', `Customer readiness to implement: высокая, средняя or низкая.`, 'string'), analysis: $fromAI('analysis', `Short factual summary of the conversation. Do not invent facts.`, 'string'), score, status }); })() }}",
+          "Skype_ID": "={{ $json.sessionId }}"
+        }
+      },
+      "type": "n8n-nodes-base.zohoCrmTool",
+      "typeVersion": 1,
+      "position": [
+        928,
+        -48
+      ],
+      "id": "adc5a0a7-714f-498f-ab67-c0249103c738",
+      "name": "Create a lead in Zoho CRM",
+      "credentials": {
+        "zohoOAuth2Api": {
+          "id": "",
+          "name": "Zoho crm"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3.1-flash-lite",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [
+        576,
+        -32
+      ],
+      "id": "212a177f-3c9f-4d3c-8246-dca62ab3e09b",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append or update row in sheet in Google Sheets": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create a lead in Zoho CRM": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "nodeGroups": []
+}
